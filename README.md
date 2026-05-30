@@ -17,6 +17,9 @@
 
 ## 3. System Architecture (システム構成)
 
+本システムは、現場からの画像アップロードを起点に、GCP内で判定からエビデンス保存までが完結するシンプルな構成です。外部SaaSへの複雑な書き込み連携がないため、極めて堅牢で障害に強い設計です。
+
+### 3-1. 静的コンポーネント構成
 ```mermaid
 graph TD
     %% エッジ層（完全オフライン環境）
@@ -49,6 +52,43 @@ graph TD
     CF -- "5. ログAppend-Only保存" --> DB
     CF -. "6. 200 OK (同期完了通知)" .-> UI
     DB -- "7. ROIの可視化" --> Dashboard
+```
+
+### 3-2. 動的処理フロー (Offline-First & MLOps)
+iOSのBackground Sync非対応という制約を運用UXでカバーしつつ、AIの品質監視（Data Feedback Loop）を実現する時間軸のフローです。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 作業者 (iOS/Tablet)
+    participant Edge as Edge AI (ブラウザ)
+    participant GCS as Cloud Storage
+    participant CF as Cloud Functions
+    participant DB as Firestore (監査ログ)
+    participant MLOps as MLOpsバケット
+
+    User->>Edge: 圏外で写真を撮影
+    Note over Edge: 0.1秒で推論 (TensorFlow.js)
+    Edge-->>User: 即座に「OK」を画面表示
+
+    alt 判定確信度が低い場合 (Model Drift対策)
+        Note over Edge: マスキングせず生データを保持
+    else 判定確信度が高い場合
+        Note over Edge: 機密情報(IP等)をマスキング
+    end
+
+    Note over User, Edge: 通信エリアへ移動 (画面は開いたまま待機)
+
+    Edge->>GCS: 画像アップロード
+    GCS->>CF: トリガー起動
+    CF->>DB: 監査証跡をAppend-Only保存
+    
+    alt 判定確信度が低い場合
+        CF->>MLOps: 再学習用データとして保存
+    end
+
+    CF-->>Edge: 200 OK (同期完了)
+    Edge-->>User: 「未同期バッジ」消去 (退室許可)
 ```
 
 ## 4. エンタープライズ品質の設計（NFR: 非機能要件）
