@@ -25,7 +25,9 @@ jobs:
         cache: 'npm'
 
     - name: Install dependencies
-      run: npm ci
+      # Cross-platform issue fix: Windows package-lock.json might not contain Linux-specific optional binaries (like @emnapi)
+      # Using npm install instead of npm ci allows Ubuntu to resolve its own platform-specific dependencies.
+      run: npm install --no-fund --no-audit
 
     - name: Run Linter
       run: npm run lint
