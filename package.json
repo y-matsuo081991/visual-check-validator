@@ -16,6 +16,7 @@
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "dexie": "^4.4.3",
+    "dexie-react-hooks": "^4.4.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

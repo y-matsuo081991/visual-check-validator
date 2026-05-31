@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from './models/database';
 import { useCamera } from './hooks/useCamera';
 import { useObjectDetection } from './hooks/useObjectDetection';
 import { CameraScanner } from './components/CameraScanner';
@@ -9,9 +11,17 @@ function App() {
   const { isModelLoaded, error: modelError, detect } = useObjectDetection();
   
   const [isScanning, setIsScanning] = useState(false);
+  const [enableMasking, setEnableMasking] = useState(false);
   const [predictions, setPredictions] = useState<DetectedObject[]>([]);
+  
   const requestRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number | null>(null);
+
+  // Sync-Aware UX: 未同期（pending）のレコード数をDexieからリアルタイム取得
+  const pendingCount = useLiveQuery(
+    () => db.evidenceRecords.where('syncStatus').equals('pending').count(),
+    []
+  ) ?? 0;
 
   // カメラの起動・停止トグル
   const toggleCamera = () => {
@@ -59,7 +69,18 @@ function App() {
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
-      <h1>Visual Check Validator (VCV)</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Visual Check Validator (VCV)</h1>
+        <div style={{ 
+          backgroundColor: pendingCount > 0 ? '#ff4444' : '#4caf50', 
+          color: 'white', 
+          padding: '5px 15px', 
+          borderRadius: '20px',
+          fontWeight: 'bold'
+        }}>
+          ☁️ 未同期: {pendingCount}件
+        </div>
+      </div>
       <p>エッジ推論モジュール (Tech Spike)</p>
 
       {/* エラー表示 */}
@@ -73,10 +94,10 @@ function App() {
       </div>
 
       {/* コントロール */}
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
         <button 
           onClick={toggleCamera}
-          style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', marginRight: '10px' }}
+          style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer' }}
         >
           {stream ? '🛑 Stop Camera' : '▶️ Start Camera'}
         </button>
@@ -88,11 +109,18 @@ function App() {
         >
           {isScanning ? '⏸️ Pause AI Detection' : '👁️ Start AI Detection'}
         </button>
+
+        <button 
+          onClick={() => setEnableMasking(!enableMasking)}
+          style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: enableMasking ? '#333' : '#ddd', color: enableMasking ? 'white' : 'black' }}
+        >
+          🛡️ Defensive Masking: {enableMasking ? 'ON' : 'OFF'}
+        </button>
       </div>
 
       {/* カメラスキャナー画面 */}
       <div style={{ border: '2px dashed #ccc', padding: '10px', borderRadius: '8px' }}>
-        <CameraScanner stream={stream} predictions={predictions} />
+        <CameraScanner stream={stream} predictions={predictions} enableMasking={enableMasking} />
         {!stream && (
           <div style={{ textAlign: 'center', padding: '50px', color: '#666' }}>
             カメラがオフです。Start Camera をクリックしてください。
