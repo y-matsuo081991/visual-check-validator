@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import App from './App';
 
@@ -52,6 +52,32 @@ describe('App Component (Sync-Aware UX)', () => {
     expect(true).toBe(true);
     
     cancelAnimationFrameSpy.mockRestore();
+    requestAnimationFrameSpy.mockRestore();
+  });
+
+  it('should continue detection loop and fetch latest state when scanning is active (RED test)', async () => {
+    const requestAnimationFrameSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      // 即座にコールバックを実行してループをシミュレート
+      setTimeout(() => cb(performance.now()), 0);
+      return 123;
+    });
+
+    const { getByText } = render(<App />);
+
+    // ボタンをクリックしてスキャンを開始（isScanning を true にする）
+    const scanButton = getByText(/Start AI Detection/);
+    scanButton.click(); // isScanning -> true の状態更新をトリガー
+
+    // 複数フレーム分の実行を待つ
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+
+    // Assert: ループが途切れることなく複数回(2回以上)呼ばれ続けていること。
+    // 現状の実装は detectLoop が初回生成時の isScanning(false) を参照してしまうため、
+    // 次のフレームが呼ばれずにループが停止し、テストが失敗(RED)する。
+    expect(requestAnimationFrameSpy.mock.calls.length).toBeGreaterThan(1);
+
     requestAnimationFrameSpy.mockRestore();
   });
 });
