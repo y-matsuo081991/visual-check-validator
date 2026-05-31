@@ -5,12 +5,13 @@ import { EvidenceRecord } from './EvidenceRecord';
 describe('EvidenceRecord Schema & Database', () => {
   let db: VcvDatabase;
 
-  beforeEach(() => {
-    // まだ実装されていないモジュールを呼び出すため、テストはREDになる
+  beforeEach(async () => {
     db = new VcvDatabase();
+    // テスト間のデータ干渉を防ぐためクリア
+    await db.evidenceRecords.clear();
   });
 
-  it('should save and retrieve an EvidenceRecord correctly (RED test)', async () => {
+  it('should save and retrieve an EvidenceRecord correctly', async () => {
     // Arrange
     const dummyBlob = new Blob(['dummy image data'], { type: 'image/jpeg' });
     const record: EvidenceRecord = {
