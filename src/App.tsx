@@ -11,6 +11,7 @@ function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [predictions, setPredictions] = useState<DetectedObject[]>([]);
   const requestRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number | null>(null);
 
   // カメラの起動・停止トグル
   const toggleCamera = () => {
@@ -24,9 +25,15 @@ function App() {
     }
   };
 
-  // 推論ループ (Detection Loop)
-  const detectLoop = async () => {
-    // video要素を取得（document.querySelector等ではなく、React的な方法が望ましいが今回は簡略化してidで取得）
+  // 推論ループ (Detection Loop) - スロットリング実装
+  const detectLoop = async (timestamp: number) => {
+    // 5fpsに制限（1000ms / 5 = 200ms）
+    if (lastFrameTimeRef.current !== null && timestamp - lastFrameTimeRef.current < 200) {
+      if (isScanning) requestRef.current = requestAnimationFrame(detectLoop);
+      return;
+    }
+    lastFrameTimeRef.current = timestamp;
+
     const videoElement = document.querySelector('video') as HTMLVideoElement;
     
     if (videoElement && videoElement.readyState >= 2) {
@@ -34,7 +41,6 @@ function App() {
       setPredictions(results);
     }
     
-    // 次のフレームで再度実行
     if (isScanning) {
       requestRef.current = requestAnimationFrame(detectLoop);
     }
@@ -43,6 +49,7 @@ function App() {
   // スキャン状態が変わったときにループを制御
   useEffect(() => {
     if (isScanning && isModelLoaded) {
+      lastFrameTimeRef.current = null; // リセット
       requestRef.current = requestAnimationFrame(detectLoop);
     }
     return () => {

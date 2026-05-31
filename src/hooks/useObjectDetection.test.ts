@@ -1,53 +1,56 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import * as tf from '@tensorflow/tfjs';
 import { useObjectDetection } from './useObjectDetection';
 
-// coco-ssd モジュールのモック
+// モックの設定
 vi.mock('@tensorflow-models/coco-ssd', () => ({
   load: vi.fn(),
+}));
+
+vi.mock('@tensorflow/tfjs', () => ({
+  setBackend: vi.fn().mockResolvedValue(true),
+  getBackend: vi.fn().mockReturnValue('wasm'), // 強制的にWASMが返るようにモックし、フォールバックをシミュレート
+  ready: vi.fn().mockResolvedValue(true),
 }));
 
 describe('useObjectDetection hook', () => {
   const mockDetect = vi.fn();
   const mockModel = {
     detect: mockDetect,
+    dispose: vi.fn(),
   };
 
   beforeEach(() => {
     vi.mocked(cocoSsd.load).mockResolvedValue(mockModel as unknown as cocoSsd.ObjectDetection);
+    vi.mocked(tf.getBackend).mockReturnValue('wasm'); // 初期化時にWASMと判定させる
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should load coco-ssd model and expose detect logic (RED test)', async () => {
-    // Act
+  it('should load coco-ssd model and expose detect logic', async () => {
     const { result } = renderHook(() => useObjectDetection());
-
-    // Assert: 初期状態では isModelLoaded は false
     expect(result.current.isModelLoaded).toBe(false);
 
-    // モデルロードを待つ
     await act(async () => {
-      // 内部の useEffect 等でロードされるのを待つため、Promise.resolve()でマクロタスクを回す
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    // Assert: load が呼ばれ、状態が更新されること
     expect(cocoSsd.load).toHaveBeenCalled();
     expect(result.current.isModelLoaded).toBe(true);
   });
 
-  it('should attempt to load WASM backend if specified (RED test)', async () => {
+  it('should attempt to load WASM backend if specified or fallback (GREEN test)', async () => {
     const { result } = renderHook(() => useObjectDetection());
     
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    // まだ実装していないため、プロパティが存在せず undefined になりテストが失敗(RED)する
+    // tf.getBackend のモックが 'wasm' を返すため、activeBackend は 'wasm' になるはず
     expect(result.current.activeBackend).toBe('wasm');
   });
 });
