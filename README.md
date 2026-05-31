@@ -5,6 +5,14 @@
 データセンターやインフラ構築の現場において、LANケーブルの「誤抜線」や「ポート挿し間違い」は、大規模なシステムダウンを引き起こす致命的なヒューマンエラーです。現在これを防ぐために「2人1組での指差喚呼・目視確認」を行っていますが、人間の感覚（やったつもり）に依存しているため事故をゼロにすることはできません。
 本プロジェクトでは、**会社貸与の専用タブレット（Edge AI）とGCP（Google Cloud Platform）**を活用し、物理的な配線作業が正しく行われたことを「AIによる客観的な画像エビデンス」として自動判定・記録するシステムを構築しました。
 
+## Tech Stack (技術スタック)
+本プロジェクトは、iOSタブレットでの完全オフライン動作とエッジ推論を実現するため、以下の技術スタックを採用しています。詳細な選定理由とトレードオフ（iOS Safari特有の制約等）については、[ADR-004](docs/adr/004_tech_stack_selection.md) を参照してください。
+
+*   **Frontend:** React (Vite) + TypeScript + PWA (Service Worker)
+*   **Edge AI:** TensorFlow.js (tfjs-backend-webgl / wasm)
+*   **Local Storage:** Dexie.js (IndexedDB)
+*   **Cloud / Backend:** Firebase (Firestore / Cloud Storage / Cloud Functions)
+
 ## 2. Architecture Decision (アーキテクチャ選定の理由)
 データセンター特有の「完全圏外（電波暗室）」「厳しい情報持ち出し制限」をクリアするため、クラウド依存のAIを棄却し、以下のハイブリッド・アーキテクチャを採用しました。
 
