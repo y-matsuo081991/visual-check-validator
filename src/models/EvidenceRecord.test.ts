@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { VcvDatabase } from './database';
-import { EvidenceRecord } from './EvidenceRecord';
+import type { EvidenceRecord } from './EvidenceRecord';
 
 describe('EvidenceRecord Schema & Database', () => {
   let db: VcvDatabase;

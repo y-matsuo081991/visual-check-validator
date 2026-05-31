@@ -7,7 +7,7 @@ describe('useCamera hook', () => {
 
   beforeEach(() => {
     // navigator.mediaDevices.getUserMedia のモック
-    Object.defineProperty(global.navigator, 'mediaDevices', {
+    Object.defineProperty(navigator, 'mediaDevices', {
       value: {
         getUserMedia: mockGetUserMedia,
       },
