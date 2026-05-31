@@ -53,4 +53,17 @@ describe('useObjectDetection hook', () => {
     // tf.getBackend のモックが 'wasm' を返すため、activeBackend は 'wasm' になるはず
     expect(result.current.activeBackend).toBe('wasm');
   });
+
+  it('should configure WASM paths properly before setting backend (RED test)', async () => {
+    renderHook(() => useObjectDetection());
+    
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // 現状は setWasmPaths が定義/インポートされておらず、呼ばれないため失敗(RED)する
+    // これを実装しないと実機で404エラーとなりアプリがクラッシュする
+    const wasmModule = await import('@tensorflow/tfjs-backend-wasm');
+    expect(wasmModule.setWasmPaths).toHaveBeenCalled();
+  });
 });
