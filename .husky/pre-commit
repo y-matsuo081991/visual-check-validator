@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running Pre-commit Checks (Lint & Type Check)..."
+
+# 1. 変更されたファイルに対してLintを実行 (lint-staged経由)
+npx lint-staged
+if [ $? -ne 0 ]; then
+  echo "❌ Lint failed. Commit blocked."
+  exit 1
+fi
+
+# 2. プロジェクト全体のTypeScriptの型チェック（ビルドエラー）を確認
+# ※ TDDのREDテスト作成時、未実装ファイルのimport等で型エラー(TS2307)が出ることがあるが、
+# TDDのサイクルを阻害しないよう、型エラーがある場合は警告を出すがブロックはしない、
+# あるいは厳格にブロックするかのトレードオフがある。
+# 今回は「ビルドエラーを残さない」品質を優先し、厳格にブロックする。
+npm run build
+if [ $? -ne 0 ]; then
+  echo "❌ TypeScript Build failed. Commit blocked."
+  exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"
