@@ -17,6 +17,9 @@ function App() {
   const requestRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number | null>(null);
   const isMountedRef = useRef<boolean>(true);
+  
+  // クロージャ問題(Silent Failure)を防ぐため、ループ内判定用の最新状態をRefで保持
+  const isScanningRef = useRef<boolean>(false);
 
   useEffect(() => {
     return () => {
@@ -30,13 +33,30 @@ function App() {
     []
   ) ?? 0;
 
+  // 状態とRefを同期して更新するヘルパー
+  const toggleScanning = (scanning: boolean) => {
+    setIsScanning(scanning);
+    isScanningRef.current = scanning;
+    
+    if (scanning && isModelLoaded) {
+      lastFrameTimeRef.current = null;
+      if (!requestRef.current) {
+        requestRef.current = requestAnimationFrame(detectLoop);
+      }
+    } else {
+      if (requestRef.current !== null) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+    }
+  };
+
   // カメラの起動・停止トグル
   const toggleCamera = () => {
     if (stream) {
       stopCamera();
-      setIsScanning(false);
+      toggleScanning(false);
       setPredictions([]);
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
     } else {
       startCamera();
     }
@@ -44,9 +64,14 @@ function App() {
 
   // 推論ループ (Detection Loop) - スロットリング実装
   const detectLoop = async (timestamp: number) => {
+    if (!isMountedRef.current || !isScanningRef.current) {
+      requestRef.current = null;
+      return;
+    }
+
     // 5fpsに制限（1000ms / 5 = 200ms）
     if (lastFrameTimeRef.current !== null && timestamp - lastFrameTimeRef.current < 200) {
-      if (isScanning) requestRef.current = requestAnimationFrame(detectLoop);
+      requestRef.current = requestAnimationFrame(detectLoop);
       return;
     }
     lastFrameTimeRef.current = timestamp;
@@ -55,30 +80,29 @@ function App() {
     
     if (videoElement && videoElement.readyState >= 2) {
       const results = await detect(videoElement);
-      // アンマウント済みなら以降の処理（ステート更新や再起呼び出し）を中断する
-      if (!isMountedRef.current) return;
+      // アンマウント済み、またはスキャン停止なら以降の処理を中断
+      if (!isMountedRef.current || !isScanningRef.current) {
+        requestRef.current = null;
+        return;
+      }
       setPredictions(results);
     }
     
-    if (isScanning && isMountedRef.current) {
+    // 次のフレームを要求
+    if (isMountedRef.current && isScanningRef.current) {
       requestRef.current = requestAnimationFrame(detectLoop);
     }
   };
 
-  // スキャン状態が変わったときにループを制御
+  // 外部からの依存変更やアンマウント時のクリーンアップのみを担当するuseEffect
   useEffect(() => {
-    if (isScanning && isModelLoaded) {
-      lastFrameTimeRef.current = null; // リセット
-      requestRef.current = requestAnimationFrame(detectLoop);
-    }
     return () => {
-      // 常に呼ばれるようにするか、isMountedRefを操作する
       if (requestRef.current !== null) {
         cancelAnimationFrame(requestRef.current);
         requestRef.current = null;
       }
     };
-  }, [isScanning, isModelLoaded, detect]);
+  }, []);
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -116,7 +140,7 @@ function App() {
         </button>
 
         <button 
-          onClick={() => setIsScanning(!isScanning)}
+          onClick={() => toggleScanning(!isScanning)}
           disabled={!stream || !isModelLoaded}
           style={{ padding: '10px 20px', fontSize: '16px', cursor: (!stream || !isModelLoaded) ? 'not-allowed' : 'pointer' }}
         >
