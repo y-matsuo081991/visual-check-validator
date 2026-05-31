@@ -16,6 +16,13 @@ function App() {
   
   const requestRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Sync-Aware UX: 未同期（pending）のレコード数をDexieからリアルタイム取得
   const pendingCount = useLiveQuery(
@@ -48,10 +55,12 @@ function App() {
     
     if (videoElement && videoElement.readyState >= 2) {
       const results = await detect(videoElement);
+      // アンマウント済みなら以降の処理（ステート更新や再起呼び出し）を中断する
+      if (!isMountedRef.current) return;
       setPredictions(results);
     }
     
-    if (isScanning) {
+    if (isScanning && isMountedRef.current) {
       requestRef.current = requestAnimationFrame(detectLoop);
     }
   };
@@ -63,7 +72,11 @@ function App() {
       requestRef.current = requestAnimationFrame(detectLoop);
     }
     return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      // 常に呼ばれるようにするか、isMountedRefを操作する
+      if (requestRef.current !== null) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
     };
   }, [isScanning, isModelLoaded, detect]);
 

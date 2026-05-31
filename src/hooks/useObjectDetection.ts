@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
-import '@tensorflow/tfjs-backend-wasm';
+import { setWasmPaths } from '@tensorflow/tfjs-backend-wasm';
 
 export const useObjectDetection = () => {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
@@ -24,6 +24,8 @@ export const useObjectDetection = () => {
         // 簡易的なフォールバックロジック（WebGLの初期化に失敗した場合等）
         if (tf.getBackend() !== 'webgl') {
           backend = 'wasm';
+          // CDN等からWASMバイナリを取得するパスを設定（これがないと404でクラッシュする）
+          setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/');
           await tf.setBackend(backend);
           await tf.ready();
         }

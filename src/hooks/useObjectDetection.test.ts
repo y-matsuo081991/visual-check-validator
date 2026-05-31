@@ -15,6 +15,10 @@ vi.mock('@tensorflow/tfjs', () => ({
   ready: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock('@tensorflow/tfjs-backend-wasm', () => ({
+  setWasmPaths: vi.fn(),
+}));
+
 describe('useObjectDetection hook', () => {
   const mockDetect = vi.fn();
   const mockModel = {
