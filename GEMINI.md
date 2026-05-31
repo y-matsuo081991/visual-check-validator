@@ -26,8 +26,11 @@
 * **ALWAYS [WASM Fallback Versioning]:** `setWasmPaths` でCDNからバイナリを取得する際は、必ず `package.json` と同バージョンのWASMバイナリ（例: `@tensorflow/tfjs-backend-wasm@4.22.0`）を明示的に指定すること。
 
 ### 4-2. React とアニメーションループ
-* **NEVER [Stale Closure in rAF]:** `requestAnimationFrame` を用いた推論ループを実装する際、コンポーネント内に直接定義した非同期関数を渡してはならない（クロージャの罠による Dead Loop を防ぐため）。
-* **ALWAYS [Ref-based Loop]:** 推論ループ関数は必ず `useRef` に格納し、`useEffect` で最新の関数を同期すること。ループの起動・停止は依存配列 `[isScanning, isModelLoaded]` を監視する `useEffect` で安全に行うこと。
+* **NEVER [Stale Closure in rAF]:** `requestAnimationFrame` を用いた推論ループを実装する際、コンポーネント内に直接定義した非同期関数を渡してはならない。また、安易に関数を `useRef` に詰めるハックも Strict Mode で初期化に失敗（Dead Loop）するため禁止する。
+* **ALWAYS [Standard Effect Loop]:** ループの管理は必ず `useEffect` 内に閉じ込め、以下の方針を厳守すること。
+  1. `let animationId: number;` を用いて、クリーンアップ関数で必ず `cancelAnimationFrame` を呼ぶ。
+  2. Stateの更新は必ず「Functional Update (`setState(prev => prev + 1)`)」を使用し、クロージャ内の古い変数への依存を完全に断ち切る。
+  3. ループの起動・停止は、イベントハンドラから直接行うのではなく、依存配列 (`[isScanning]`) を監視する `useEffect` の発火に委譲する。
 
 ### 4-3. セキュリティ (Defensive Masking)
 * **ALWAYS [Fail-Safe Masking]:** ADR-002に基づき、Defensive MaskingがONの場合は、**検知件数が0件であっても背景を必ず黒塗り（`fillRect`）すること**。対象物が検知された場合のみ `destination-out` で「くり抜く」設計とし、情報漏洩（背景の素通し）を物理的に防ぐこと。

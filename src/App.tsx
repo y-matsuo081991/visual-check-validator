@@ -18,14 +18,9 @@ function App() {
   const [debugLoopCount, setDebugLoopCount] = useState(0);
   const [debugLastResultCount, setDebugLastResultCount] = useState(0);
 
-  const requestRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number | null>(null);
   const isMountedRef = useRef<boolean>(true);
   
-  // クロージャ問題(Silent Failure)を防ぐため、ループ内判定用の最新状態をRefで保持
-  const isScanningRef = useRef<boolean>(false);
-  const loopCounterRef = useRef<number>(0);
-
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -41,7 +36,6 @@ function App() {
   // 状態とRefを同期して更新するヘルパー
   const toggleScanning = (scanning: boolean) => {
     setIsScanning(scanning);
-    isScanningRef.current = scanning;
   };
 
   // カメラの起動・停止トグル
@@ -55,18 +49,12 @@ function App() {
     }
   };
 
-  // 推論ループの実体
-  // useRefに格納することでクロージャの罠を回避し、再描画の影響を受けないようにする
-  const detectLoopRef = useRef<((timestamp: number) => Promise<void>) | null>(null);
-
-  // レンダリングフェーズ外（useEffect内）で最新の関数をRefに同期する
+  // 外部からの依存変更やアンマウント時のクリーンアップのみを担当するuseEffect
+  // isScanningとisModelLoadedの変更を検知してループを自動的に起動・停止する（React Standard）
   useEffect(() => {
-    detectLoopRef.current = async (timestamp: number) => {
-      if (!isMountedRef.current || !isScanningRef.current) {
-        requestRef.current = null;
-        return;
-      }
+    let animationId: number;
 
+    const animate = async (timestamp: number) => {
       const videoElement = document.querySelector('video') as HTMLVideoElement;
       
       // スタンダードな防御的実装: ビデオが本当に再生可能かチェックする
@@ -76,59 +64,43 @@ function App() {
         && videoElement.videoHeight > 0;
 
       if (isVideoReady) {
-        // 5fpsスロットリング: 前回の推論から十分な時間（200ms）が経過しているかチェック
+        // 5fpsスロットリング
         if (lastFrameTimeRef.current === null || timestamp - lastFrameTimeRef.current >= 200) {
           lastFrameTimeRef.current = timestamp;
-          loopCounterRef.current += 1;
           
-          // TF.jsの推論実行
-          const results = await detect(videoElement);
-          
-          // 推論（await）の間に停止指示が来ていれば結果を破棄
-          if (!isMountedRef.current || !isScanningRef.current) {
-            requestRef.current = null;
-            return;
+          try {
+            const results = await detect(videoElement);
+            
+            // isScanning自体はクロージャだが、このループは isScanning が変わるたびに
+            // useEffectによって破棄・再生成されるため、常に最新の true を見ている
+            setPredictions(results);
+            
+            // functional update を使うことでクロージャに依存せずカウントアップする
+            setDebugLoopCount(prev => prev + 1);
+            setDebugLastResultCount(results.length);
+          } catch (e) {
+             console.error("Detection error:", e);
           }
-          
-          setPredictions(results);
-          setDebugLoopCount(loopCounterRef.current);
-          setDebugLastResultCount(results.length);
         }
       }
 
-      // 【重要】ビデオが準備中でスキップした場合も、推論が終わった場合も、
-      // 次のフレームで再確認するため、必ず requestAnimationFrame を呼んでループを継続する。
-      // ※クロージャを避けるため、直接関数名ではなくRef経由で呼ぶ
-      if (isMountedRef.current && isScanningRef.current) {
-        requestRef.current = requestAnimationFrame((t) => detectLoopRef.current && detectLoopRef.current(t));
-      }
+      // 次のフレームをスケジュール
+      animationId = requestAnimationFrame(animate);
     };
-  }); // 依存配列なし = 毎レンダリング後に最新のクロージャを同期する
 
-  // 外部からの依存変更やアンマウント時のクリーンアップのみを担当するuseEffect
-  // isScanningとisModelLoadedの変更を検知してループを自動的に起動・停止する（React Standard）
-  useEffect(() => {
     if (isScanning && isModelLoaded) {
-      // ループがまだ回っていない場合のみ発火
-      if (!requestRef.current) {
-        lastFrameTimeRef.current = null;
-        requestRef.current = requestAnimationFrame((t) => detectLoopRef.current && detectLoopRef.current(t));
-      }
-    } else {
-      // 停止時
-      if (requestRef.current !== null) {
-        cancelAnimationFrame(requestRef.current);
-        requestRef.current = null;
-      }
+      lastFrameTimeRef.current = null;
+      // ループ開始
+      animationId = requestAnimationFrame(animate);
     }
 
+    // クリーンアップ関数（Strict Modeによる再マウント時やスキャン停止時に絶対に前のループを殺す）
     return () => {
-      if (requestRef.current !== null) {
-        cancelAnimationFrame(requestRef.current);
-        requestRef.current = null;
+      if (animationId !== undefined) {
+        cancelAnimationFrame(animationId);
       }
     };
-  }, [isScanning, isModelLoaded]);
+  }, [isScanning, isModelLoaded, detect]);
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
