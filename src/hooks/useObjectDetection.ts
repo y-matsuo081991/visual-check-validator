@@ -53,6 +53,7 @@ export const useObjectDetection = () => {
   return {
     isModelLoaded,
     error,
-    detect
+    detect,
+    activeBackend: 'webgl' // TDD RED: hardcoded to webgl, test expects wasm or dynamic
   };
 };

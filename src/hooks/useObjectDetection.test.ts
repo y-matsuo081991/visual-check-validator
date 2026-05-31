@@ -39,4 +39,15 @@ describe('useObjectDetection hook', () => {
     expect(cocoSsd.load).toHaveBeenCalled();
     expect(result.current.isModelLoaded).toBe(true);
   });
+
+  it('should attempt to load WASM backend if specified (RED test)', async () => {
+    const { result } = renderHook(() => useObjectDetection());
+    
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // まだ実装していないため、プロパティが存在せず undefined になりテストが失敗(RED)する
+    expect(result.current.activeBackend).toBe('wasm');
+  });
 });
