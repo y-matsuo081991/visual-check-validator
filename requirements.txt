@@ -1,0 +1,3 @@
+# Python dependencies for Visual Check Validator (VCV)
+# Currently empty as edge AI runs via TensorFlow.js in the browser (see package.json).
+# Future utilities (e.g., model conversion scripts) will be added here.
