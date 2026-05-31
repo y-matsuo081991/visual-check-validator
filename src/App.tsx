@@ -14,12 +14,17 @@ function App() {
   const [enableMasking, setEnableMasking] = useState(false);
   const [predictions, setPredictions] = useState<DetectedObject[]>([]);
   
+  // デバッグ用ステータス
+  const [debugLoopCount, setDebugLoopCount] = useState(0);
+  const [debugLastResultCount, setDebugLastResultCount] = useState(0);
+
   const requestRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number | null>(null);
   const isMountedRef = useRef<boolean>(true);
   
   // クロージャ問題(Silent Failure)を防ぐため、ループ内判定用の最新状態をRefで保持
   const isScanningRef = useRef<boolean>(false);
+  const loopCounterRef = useRef<number>(0);
 
   useEffect(() => {
     return () => {
@@ -37,18 +42,6 @@ function App() {
   const toggleScanning = (scanning: boolean) => {
     setIsScanning(scanning);
     isScanningRef.current = scanning;
-    
-    if (scanning && isModelLoaded) {
-      lastFrameTimeRef.current = null;
-      if (!requestRef.current) {
-        requestRef.current = requestAnimationFrame(detectLoop);
-      }
-    } else {
-      if (requestRef.current !== null) {
-        cancelAnimationFrame(requestRef.current);
-        requestRef.current = null;
-      }
-    }
   };
 
   // カメラの起動・停止トグル
@@ -62,47 +55,80 @@ function App() {
     }
   };
 
-  // 推論ループ (Detection Loop) - スロットリング実装
-  const detectLoop = async (timestamp: number) => {
-    if (!isMountedRef.current || !isScanningRef.current) {
-      requestRef.current = null;
-      return;
-    }
+  // 推論ループの実体
+  // useRefに格納することでクロージャの罠を回避し、再描画の影響を受けないようにする
+  const detectLoopRef = useRef<((timestamp: number) => Promise<void>) | null>(null);
 
-    // 5fpsに制限（1000ms / 5 = 200ms）
-    if (lastFrameTimeRef.current !== null && timestamp - lastFrameTimeRef.current < 200) {
-      requestRef.current = requestAnimationFrame(detectLoop);
-      return;
-    }
-    lastFrameTimeRef.current = timestamp;
-
-    const videoElement = document.querySelector('video') as HTMLVideoElement;
-    
-    if (videoElement && videoElement.readyState >= 2) {
-      const results = await detect(videoElement);
-      // アンマウント済み、またはスキャン停止なら以降の処理を中断
+  // レンダリングフェーズ外（useEffect内）で最新の関数をRefに同期する
+  useEffect(() => {
+    detectLoopRef.current = async (timestamp: number) => {
       if (!isMountedRef.current || !isScanningRef.current) {
         requestRef.current = null;
         return;
       }
-      setPredictions(results);
-    }
-    
-    // 次のフレームを要求
-    if (isMountedRef.current && isScanningRef.current) {
-      requestRef.current = requestAnimationFrame(detectLoop);
-    }
-  };
+
+      const videoElement = document.querySelector('video') as HTMLVideoElement;
+      
+      // スタンダードな防御的実装: ビデオが本当に再生可能かチェックする
+      const isVideoReady = videoElement 
+        && videoElement.readyState >= 2 
+        && videoElement.videoWidth > 0 
+        && videoElement.videoHeight > 0;
+
+      if (isVideoReady) {
+        // 5fpsスロットリング: 前回の推論から十分な時間（200ms）が経過しているかチェック
+        if (lastFrameTimeRef.current === null || timestamp - lastFrameTimeRef.current >= 200) {
+          lastFrameTimeRef.current = timestamp;
+          loopCounterRef.current += 1;
+          
+          // TF.jsの推論実行
+          const results = await detect(videoElement);
+          
+          // 推論（await）の間に停止指示が来ていれば結果を破棄
+          if (!isMountedRef.current || !isScanningRef.current) {
+            requestRef.current = null;
+            return;
+          }
+          
+          setPredictions(results);
+          setDebugLoopCount(loopCounterRef.current);
+          setDebugLastResultCount(results.length);
+        }
+      }
+
+      // 【重要】ビデオが準備中でスキップした場合も、推論が終わった場合も、
+      // 次のフレームで再確認するため、必ず requestAnimationFrame を呼んでループを継続する。
+      // ※クロージャを避けるため、直接関数名ではなくRef経由で呼ぶ
+      if (isMountedRef.current && isScanningRef.current) {
+        requestRef.current = requestAnimationFrame((t) => detectLoopRef.current && detectLoopRef.current(t));
+      }
+    };
+  }); // 依存配列なし = 毎レンダリング後に最新のクロージャを同期する
 
   // 外部からの依存変更やアンマウント時のクリーンアップのみを担当するuseEffect
+  // isScanningとisModelLoadedの変更を検知してループを自動的に起動・停止する（React Standard）
   useEffect(() => {
+    if (isScanning && isModelLoaded) {
+      // ループがまだ回っていない場合のみ発火
+      if (!requestRef.current) {
+        lastFrameTimeRef.current = null;
+        requestRef.current = requestAnimationFrame((t) => detectLoopRef.current && detectLoopRef.current(t));
+      }
+    } else {
+      // 停止時
+      if (requestRef.current !== null) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+    }
+
     return () => {
       if (requestRef.current !== null) {
         cancelAnimationFrame(requestRef.current);
         requestRef.current = null;
       }
     };
-  }, []);
+  }, [isScanning, isModelLoaded]);
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -128,6 +154,12 @@ function App() {
       <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '8px' }}>
         <div>🤖 AI Model: <strong>{isModelLoaded ? 'Loaded (coco-ssd)' : 'Loading...'}</strong></div>
         <div>📷 Camera: <strong>{stream ? 'Active' : 'Inactive'}</strong></div>
+        {/* デバッグパネル */}
+        <div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#e0e0e0', border: '1px solid #ccc', fontSize: '14px', fontFamily: 'monospace' }}>
+          <strong>[DEBUG PANEL]</strong><br/>
+          ループ実行回数: {debugLoopCount}<br/>
+          直近の検知件数: {debugLastResultCount}
+        </div>
       </div>
 
       {/* コントロール */}

@@ -24,8 +24,8 @@ export const useObjectDetection = () => {
         // 簡易的なフォールバックロジック（WebGLの初期化に失敗した場合等）
         if (tf.getBackend() !== 'webgl') {
           backend = 'wasm';
-          // CDN等からWASMバイナリを取得するパスを設定（これがないと404でクラッシュする）
-          setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/');
+          // package.jsonのバージョンと一致させるため、明示的にバージョンを指定してWASMバイナリを取得する
+          setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/');
           await tf.setBackend(backend);
           await tf.ready();
         }
@@ -62,18 +62,21 @@ export const useObjectDetection = () => {
       return [];
     }
 
+    let pixels: tf.Tensor3D | null = null;
     try {
-      // 【WARNING: メモリリーク注意】
-      // 非同期推論では tf.tidy() 内で作成されたテンソルでも自動解放されない場合がある。
-      // 本来は tf.engine().startScope() / endScope() や明示的な dispose() が望ましいが、
-      // coco-ssd の detect 内部で生成されるテンソルはライブラリ側で管理される。
-      // ただし、もし前処理として tf.browser.fromPixels(videoElement) 等を行う場合は、
-      // 必ず明示的に tensor.dispose() を呼ぶこと。
-      const predictions = await modelRef.current.detect(videoElement);
+      // TensorFlow.js推奨パターン:
+      // 非同期環境では startScope/endScope を使わず、明示的にテンソルを作り dispose する
+      pixels = tf.browser.fromPixels(videoElement);
+      const predictions = await modelRef.current.detect(pixels);
       return predictions;
     } catch (err) {
       console.error('Detection error:', err);
       return [];
+    } finally {
+      // 推論成功・エラーに関わらず、確保したVRAMを必ず解放する
+      if (pixels) {
+        pixels.dispose();
+      }
     }
   }, []);
 

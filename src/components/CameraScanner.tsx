@@ -43,19 +43,23 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ stream, prediction
 
     // --- Mask Canvas (黒塗り処理) ---
     maskCtx.clearRect(0, 0, width, height);
-    if (enableMasking && predictions.length > 0) {
-      // 画面全体を一旦真っ黒に塗る
+    
+    // ADR-002: 機密情報保護のため、enableMasking がONの時は常に背景を黒塗りする
+    if (enableMasking) {
+      // まず画面全体を真っ黒に塗る（対象物がない場合でも背景を隠し通す）
       maskCtx.fillStyle = 'rgba(0, 0, 0, 0.9)'; // ほぼ真っ黒だが、UI確認のために若干透過
       maskCtx.fillRect(0, 0, width, height);
       
-      // 対象物の部分だけを「くり抜く（透明にする）」
-      maskCtx.globalCompositeOperation = 'destination-out';
-      predictions.forEach(prediction => {
-        const [x, y, w, h] = prediction.bbox;
-        maskCtx.fillRect(x, y, w, h);
-      });
-      // 元の描画モードに戻す
-      maskCtx.globalCompositeOperation = 'source-over';
+      // 対象物が検知された場合のみ、その部分だけを「くり抜く（透明にする）」
+      if (predictions.length > 0) {
+        maskCtx.globalCompositeOperation = 'destination-out';
+        predictions.forEach(prediction => {
+          const [x, y, w, h] = prediction.bbox;
+          maskCtx.fillRect(x, y, w, h);
+        });
+        // 元の描画モードに戻す
+        maskCtx.globalCompositeOperation = 'source-over';
+      }
     }
 
     // 各予測結果に対して枠とテキストを描画
@@ -86,6 +90,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ stream, prediction
         autoPlay
         playsInline
         muted
+        width={640}
+        height={480}
         data-testid="camera-video"
         style={{ width: '100%', height: 'auto', display: 'block' }}
       />

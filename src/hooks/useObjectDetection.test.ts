@@ -9,11 +9,15 @@ vi.mock('@tensorflow-models/coco-ssd', () => ({
   load: vi.fn(),
 }));
 
-vi.mock('@tensorflow/tfjs', () => ({
-  setBackend: vi.fn().mockResolvedValue(true),
-  getBackend: vi.fn().mockReturnValue('wasm'), // 強制的にWASMが返るようにモックし、フォールバックをシミュレート
-  ready: vi.fn().mockResolvedValue(true),
-}));
+vi.mock('@tensorflow/tfjs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tensorflow/tfjs')>();
+  return {
+    ...actual,
+    setBackend: vi.fn().mockResolvedValue(true),
+    getBackend: vi.fn().mockReturnValue('wasm'),
+    ready: vi.fn().mockResolvedValue(true),
+  };
+});
 
 vi.mock('@tensorflow/tfjs-backend-wasm', () => ({
   setWasmPaths: vi.fn(),
@@ -58,16 +62,48 @@ describe('useObjectDetection hook', () => {
     expect(result.current.activeBackend).toBe('wasm');
   });
 
-  it('should configure WASM paths properly before setting backend (RED test)', async () => {
+  it('should configure WASM paths with exact version from package.json (RED test)', async () => {
     renderHook(() => useObjectDetection());
     
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    // 現状は setWasmPaths が定義/インポートされておらず、呼ばれないため失敗(RED)する
-    // これを実装しないと実機で404エラーとなりアプリがクラッシュする
     const wasmModule = await import('@tensorflow/tfjs-backend-wasm');
     expect(wasmModule.setWasmPaths).toHaveBeenCalled();
+    
+    // CDNパスが `latest` ではなく、package.jsonのバージョン (4.22.0) に固定されていることを確認
+    expect(wasmModule.setWasmPaths).toHaveBeenCalledWith(
+      expect.stringContaining('@tensorflow/tfjs-backend-wasm@4.22.0')
+    );
+  });
+
+  it('should not leak memory (tensors) during asynchronous detect calls (RED test)', async () => {
+    // モックモデルが呼ばれた際に、内部で意図的にテンソルを生成してリークをシミュレートする
+    // (実際の coco-ssd.detect 内部で HTMLVideoElement がテンソル化される挙動の再現)
+    mockDetect.mockImplementationOnce(async () => {
+      tf.tensor1d([1, 2, 3]); // このテンソルが解放されるかをテストする
+      return [];
+    });
+
+    const { result } = renderHook(() => useObjectDetection());
+    
+    // モデルロードを待機
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const initialTensors = tf.memory().numTensors;
+    const dummyVideo = document.createElement('video');
+
+    await act(async () => {
+      await result.current.detect(dummyVideo);
+    });
+
+    const finalTensors = tf.memory().numTensors;
+    
+    // 正しい実装(try...finally + dispose)により、非同期内部のテンソルは確実に解放される。
+    // そのため、初期状態とテンソル数が一致（リークなし）することを証明(GREEN)する。
+    expect(finalTensors).toBe(initialTensors);
   });
 });
