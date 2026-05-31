@@ -205,8 +205,65 @@ describe('App Component (Sync-Aware UX)', () => {
 
     // 期待値: 完璧な状態のビデオが存在し、スキャンを開始したのだから、
     // AIの推論処理（detect）は最低でも1回以上呼ばれていなければならない。
-    // 現状はクロージャの罠により、ボタンを押した時点の関数が `isScanningRef.current` を
-    // false と誤認して即座に終了するため、このアサーションは失敗(RED)する。
+    expect(mockDetect).toHaveBeenCalled();
+  });
+
+  it('MUST keep the detection loop running even after React Strict Mode double-mount or state updates (RED test)', async () => {
+    // ブラウザで「ループ実行回数: 0」になるバグの完全な再現。
+    // React 18のStrict Modeや、コンポーネントの再レンダリングによって
+    // requestAnimationFrame のクリーンアップが誤作動し、
+    // 以降二度とループが着火しなくなる（サイレントに死ぬ）問題を証明する。
+
+    const mockDetect = vi.fn().mockResolvedValue([]);
+    vi.mocked(useObjectDetection).mockReturnValue({
+      isModelLoaded: true,
+      error: null,
+      detect: mockDetect,
+      activeBackend: 'wasm',
+    });
+
+    const originalQuerySelector = document.querySelector.bind(document);
+    vi.spyOn(document, 'querySelector').mockImplementation((selector) => {
+      if (selector === 'video') {
+        const video = document.createElement('video');
+        Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+        Object.defineProperty(video, 'videoWidth', { value: 640, configurable: true });
+        Object.defineProperty(video, 'videoHeight', { value: 480, configurable: true });
+        return video;
+      }
+      return originalQuerySelector(selector);
+    });
+
+    // アニメーションフレームを同期的に進める
+    let frameTime = performance.now();
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frameTime += 300; 
+      setTimeout(() => cb(frameTime), 0);
+      return 1;
+    });
+
+    const { getByText, rerender, unmount } = render(<App />);
+    const scanButton = getByText(/Start AI Detection/);
+    
+    // スキャン開始
+    await act(async () => {
+      scanButton.click();
+    });
+
+    // Strict Modeの挙動（または他のStateによる再レンダリング）をシミュレート
+    rerender(<App />);
+
+    // 再レンダリング後、ループが回るのを待つ
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    unmount();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+
+    // 現状の実装はループ管理（useEffectの依存配列とRefの同期）が破綻しているため、
+    // 再レンダリングが挟まると detect は1回も呼ばれずにループが死ぬ（REDになる）。
     expect(mockDetect).toHaveBeenCalled();
   });
 });
