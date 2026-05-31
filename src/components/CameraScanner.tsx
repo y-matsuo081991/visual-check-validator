@@ -4,6 +4,7 @@ import type { DetectedObject } from '@tensorflow-models/coco-ssd';
 export interface CameraScannerProps {
   stream: MediaStream | null;
   predictions: DetectedObject[];
+  enableMasking?: boolean; // TDD RED Phase: property added to pass TS
 }
 
 export const CameraScanner: React.FC<CameraScannerProps> = ({ stream, predictions }) => {
