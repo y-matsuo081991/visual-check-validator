@@ -1,122 +1,99 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useEffect, useRef } from 'react';
+import { useCamera } from './hooks/useCamera';
+import { useObjectDetection } from './hooks/useObjectDetection';
+import { CameraScanner } from './components/CameraScanner';
+import type { DetectedObject } from '@tensorflow-models/coco-ssd';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const { stream, error: cameraError, startCamera, stopCamera } = useCamera();
+  const { isModelLoaded, error: modelError, detect } = useObjectDetection();
+  
+  const [isScanning, setIsScanning] = useState(false);
+  const [predictions, setPredictions] = useState<DetectedObject[]>([]);
+  const requestRef = useRef<number | null>(null);
+
+  // カメラの起動・停止トグル
+  const toggleCamera = () => {
+    if (stream) {
+      stopCamera();
+      setIsScanning(false);
+      setPredictions([]);
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    } else {
+      startCamera();
+    }
+  };
+
+  // 推論ループ (Detection Loop)
+  const detectLoop = async () => {
+    // video要素を取得（document.querySelector等ではなく、React的な方法が望ましいが今回は簡略化してidで取得）
+    const videoElement = document.querySelector('video') as HTMLVideoElement;
+    
+    if (videoElement && videoElement.readyState >= 2) {
+      const results = await detect(videoElement);
+      setPredictions(results);
+    }
+    
+    // 次のフレームで再度実行
+    if (isScanning) {
+      requestRef.current = requestAnimationFrame(detectLoop);
+    }
+  };
+
+  // スキャン状態が変わったときにループを制御
+  useEffect(() => {
+    if (isScanning && isModelLoaded) {
+      requestRef.current = requestAnimationFrame(detectLoop);
+    }
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [isScanning, isModelLoaded, detect]);
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
+    <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
+      <h1>Visual Check Validator (VCV)</h1>
+      <p>エッジ推論モジュール (Tech Spike)</p>
+
+      {/* エラー表示 */}
+      {cameraError && <div style={{ color: 'red', margin: '10px 0' }}>📷 {cameraError.message}</div>}
+      {modelError && <div style={{ color: 'red', margin: '10px 0' }}>🧠 {modelError.message}</div>}
+
+      {/* 状態表示 */}
+      <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '8px' }}>
+        <div>🤖 AI Model: <strong>{isModelLoaded ? 'Loaded (coco-ssd)' : 'Loading...'}</strong></div>
+        <div>📷 Camera: <strong>{stream ? 'Active' : 'Inactive'}</strong></div>
+      </div>
+
+      {/* コントロール */}
+      <div style={{ marginBottom: '20px' }}>
+        <button 
+          onClick={toggleCamera}
+          style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', marginRight: '10px' }}
         >
-          Count is {count}
+          {stream ? '🛑 Stop Camera' : '▶️ Start Camera'}
         </button>
-      </section>
 
-      <div className="ticks"></div>
+        <button 
+          onClick={() => setIsScanning(!isScanning)}
+          disabled={!stream || !isModelLoaded}
+          style={{ padding: '10px 20px', fontSize: '16px', cursor: (!stream || !isModelLoaded) ? 'not-allowed' : 'pointer' }}
+        >
+          {isScanning ? '⏸️ Pause AI Detection' : '👁️ Start AI Detection'}
+        </button>
+      </div>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      {/* カメラスキャナー画面 */}
+      <div style={{ border: '2px dashed #ccc', padding: '10px', borderRadius: '8px' }}>
+        <CameraScanner stream={stream} predictions={predictions} />
+        {!stream && (
+          <div style={{ textAlign: 'center', padding: '50px', color: '#666' }}>
+            カメラがオフです。Start Camera をクリックしてください。
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
-export default App
+export default App;
