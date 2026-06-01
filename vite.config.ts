@@ -15,7 +15,14 @@ export default defineConfig({
         theme_color: '#ffffff',
         // iOS SafariのIndexedDB消去回避のため、Standaloneモードを強制
         display: 'standalone',
-        icons: [] // 本来はアイコン定義が必要だが、今回はPoCのため省略
+        icons: [
+          {
+            src: '/icon.svg',
+            sizes: '192x192 512x512',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
+          }
+        ]
       }
     })
   ],

@@ -14,6 +14,9 @@ function App() {
   const [enableMasking, setEnableMasking] = useState(false);
   const [predictions, setPredictions] = useState<DetectedObject[]>([]);
   
+  // Sync-Aware UX: オフラインモック用のステート
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
   // デバッグ用ステータス
   const [debugLoopCount, setDebugLoopCount] = useState(0);
   const [debugLastResultCount, setDebugLastResultCount] = useState(0);
@@ -32,6 +35,39 @@ function App() {
     () => db.evidenceRecords.where('syncStatus').equals('pending').count(),
     []
   ) ?? 0;
+
+  // モックレコードの保存（オフライン時の蓄積シミュレーション）
+  const saveMockRecord = async () => {
+    await db.evidenceRecords.add({
+      id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
+      timestamp: Date.now(),
+      portNumber: 'MOCK-PORT-01',
+      imageBlob: new Blob(['mock image data'], { type: 'image/jpeg' }),
+      isMasked: enableMasking,
+      syncStatus: 'pending'
+    });
+  };
+
+  // バックグラウンド同期のシミュレーション
+  const syncRecords = async () => {
+    const pendingRecords = await db.evidenceRecords.where('syncStatus').equals('pending').toArray();
+    if (pendingRecords.length === 0) return;
+    
+    // ネットワーク遅延のシミュレート
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // 送信成功としてステータスを更新 (モック)
+    // 実際の運用ではここでGCPの署名付きURLを取得してPUTし、200 OKを受けてから更新する
+    await db.evidenceRecords.where('syncStatus').equals('pending').modify({ syncStatus: 'synced' });
+    console.log('[Sync-Aware UX] Sync Complete: ' + pendingRecords.length + ' records synced.');
+  };
+
+  // オンライン復帰（オフラインモードOFF）を検知して同期を実行
+  useEffect(() => {
+    if (!isOfflineMode) {
+      syncRecords();
+    }
+  }, [isOfflineMode]);
 
   // 状態とRefを同期して更新するヘルパー
   const toggleScanning = (scanning: boolean) => {
@@ -104,14 +140,15 @@ function App() {
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Visual Check Validator (VCV)</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+        <h1 style={{ margin: 0, fontSize: '1.8rem', lineHeight: '1.2' }}>Visual Check Validator (VCV)</h1>
         <div style={{ 
           backgroundColor: pendingCount > 0 ? '#ff4444' : '#4caf50', 
           color: 'white', 
           padding: '5px 15px', 
           borderRadius: '20px',
-          fontWeight: 'bold'
+          fontWeight: 'bold',
+          whiteSpace: 'nowrap'
         }}>
           ☁️ 未同期: {pendingCount}件
         </div>
@@ -157,6 +194,22 @@ function App() {
         >
           🛡️ Defensive Masking: {enableMasking ? 'ON' : 'OFF'}
         </button>
+
+        <div style={{ borderLeft: '2px solid #ccc', paddingLeft: '10px', marginLeft: '10px', display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={() => setIsOfflineMode(!isOfflineMode)}
+            style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: isOfflineMode ? '#ff9800' : '#4caf50', color: 'white', fontWeight: 'bold' }}
+          >
+            🔌 Simulate Offline Mode: {isOfflineMode ? 'ON' : 'OFF'}
+          </button>
+
+          <button 
+            onClick={saveMockRecord}
+            style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#2196f3', color: 'white' }}
+          >
+            📸 Save Result (Mock)
+          </button>
+        </div>
       </div>
 
       {/* カメラスキャナー画面 */}

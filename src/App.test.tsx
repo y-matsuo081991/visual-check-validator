@@ -266,4 +266,60 @@ describe('App Component (Sync-Aware UX)', () => {
     // 再レンダリングが挟まると detect は1回も呼ばれずにループが死ぬ（REDになる）。
     expect(mockDetect).toHaveBeenCalled();
   });
+
+  it('MUST handle offline saving and online background sync (Sync-Aware UX RED test)', async () => {
+    // 1. オフラインモードをONにする
+    // 2. モック保存ボタンを押して、Dexieにpendingレコードを追加する
+    // 3. UIのバッジが「未同期: 1件」になることを確認する
+    // 4. オフラインモードをOFF（オンライン）に戻す
+    // 5. バックグラウンドで同期処理が走り、Dexieのレコードが消え、バッジが「未同期: 0件」に戻ることを確認する
+
+    const { getByText, findByText, unmount } = render(<App />);
+
+    // まだこれらのボタンは存在しないので、ここで getByText がコケて RED になる
+    const offlineToggle = getByText(/Simulate Offline Mode: OFF/);
+    const saveMockButton = getByText(/Save Result \(Mock\)/);
+
+    // 1. オフラインモードをONにする
+    await act(async () => {
+      offlineToggle.click();
+    });
+    expect(offlineToggle.textContent).toContain('ON');
+
+    // 2. 保存ボタンを押す
+    await act(async () => {
+      saveMockButton.click();
+    });
+
+    // 3. 未同期バッジが増えることを確認
+    const badge1 = await findByText(/☁️ 未同期: 1件/);
+    expect(badge1).toBeInTheDocument();
+
+    // 4. オンラインに復帰する
+    await act(async () => {
+      offlineToggle.click();
+    });
+
+    // 5. バックグラウンド同期が走り、バッジが0に戻ることを確認
+    const badge0 = await findByText(/☁️ 未同期: 0件/);
+    expect(badge0).toBeInTheDocument();
+
+    unmount();
+  });
+
+  it('MUST have responsive layout styles to prevent title overlap on narrow screens (Layout RED test)', () => {
+    const { getByRole } = render(<App />);
+    
+    // タイトル(h1)を取得
+    const titleElement = getByRole('heading', { name: 'Visual Check Validator (VCV)' });
+    
+    // タイトルと未同期バッジを囲んでいる親コンテナを取得
+    const headerContainer = titleElement.parentElement;
+
+    // 1. 画面幅が狭くなった際に、タイトルとバッジが重ならないように折り返す(wrap)設定があること
+    expect(headerContainer).toHaveStyle('flex-wrap: wrap');
+
+    // 2. タイトル文字自体が折り返された際に、行同士が重ならないように line-height が設定されていること
+    expect(titleElement).toHaveStyle('line-height: 1.2');
+  });
 });
