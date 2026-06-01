@@ -1,9 +1,14 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import packageJson from './package.json'
 
-// https://vite.dev/config/
+// https://vitejs.dev/config/
 export default defineConfig({
+  define: {
+    // Inject the exact version of the WASM backend from package.json
+    __TFJS_VERSION__: JSON.stringify(packageJson.dependencies['@tensorflow/tfjs-backend-wasm'].replace(/[^0-9.]/g, ''))
+  },
   plugins: [
     react(),
     VitePWA({

@@ -62,7 +62,10 @@ describe('useObjectDetection hook', () => {
     expect(result.current.activeBackend).toBe('wasm');
   });
 
-  it('should configure WASM paths with exact version from package.json (RED test)', async () => {
+  it('should configure WASM paths dynamically from build injection (RED test)', async () => {
+    // グローバル変数 __TFJS_VERSION__ のモック（ビルド時に注入される想定）
+    vi.stubGlobal('__TFJS_VERSION__', '9.9.9');
+
     renderHook(() => useObjectDetection());
     
     await act(async () => {
@@ -72,9 +75,9 @@ describe('useObjectDetection hook', () => {
     const wasmModule = await import('@tensorflow/tfjs-backend-wasm');
     expect(wasmModule.setWasmPaths).toHaveBeenCalled();
     
-    // CDNパスが `latest` ではなく、package.jsonのバージョン (4.22.0) に固定されていることを確認
+    // CDNパスが動的変数 __TFJS_VERSION__ (モックの9.9.9) を使って生成されていることを確認
     expect(wasmModule.setWasmPaths).toHaveBeenCalledWith(
-      expect.stringContaining('@tensorflow/tfjs-backend-wasm@4.22.0')
+      expect.stringContaining('@tensorflow/tfjs-backend-wasm@9.9.9')
     );
   });
 

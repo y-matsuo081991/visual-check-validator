@@ -24,8 +24,8 @@ export const useObjectDetection = () => {
         // 簡易的なフォールバックロジック（WebGLの初期化に失敗した場合等）
         if (tf.getBackend() !== 'webgl') {
           backend = 'wasm';
-          // package.jsonのバージョンと一致させるため、明示的にバージョンを指定してWASMバイナリを取得する
-          setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/');
+          // package.jsonのバージョンと一致させるため、ビルド時に注入されたバージョンを利用する
+          setWasmPaths(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${__TFJS_VERSION__}/dist/`);
           await tf.setBackend(backend);
           await tf.ready();
         }

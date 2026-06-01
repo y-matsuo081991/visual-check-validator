@@ -3,8 +3,9 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from './models/database';
 import { useCamera } from './hooks/useCamera';
 import { useObjectDetection } from './hooks/useObjectDetection';
+import { useInferenceLoop } from './hooks/useInferenceLoop';
 import { CameraScanner } from './components/CameraScanner';
-import type { DetectedObject } from '@tensorflow-models/coco-ssd';
+import { saveMockRecord, syncRecords } from './services/syncService';
 
 function App() {
   const { stream, error: cameraError, startCamera, stopCamera } = useCamera();
@@ -12,16 +13,13 @@ function App() {
   
   const [isScanning, setIsScanning] = useState(false);
   const [enableMasking, setEnableMasking] = useState(false);
-  const [predictions, setPredictions] = useState<DetectedObject[]>([]);
   
   // Sync-Aware UX: オフラインモック用のステート
   const [isOfflineMode, setIsOfflineMode] = useState(false);
 
-  // デバッグ用ステータス
-  const [debugLoopCount, setDebugLoopCount] = useState(0);
-  const [debugLastResultCount, setDebugLastResultCount] = useState(0);
+  // 推論ループのロジックを分離したHookを利用
+  const { predictions, setPredictions, debugLoopCount, debugLastResultCount } = useInferenceLoop(isScanning, isModelLoaded, detect);
 
-  const lastFrameTimeRef = useRef<number | null>(null);
   const isMountedRef = useRef<boolean>(true);
   
   useEffect(() => {
@@ -37,29 +35,8 @@ function App() {
   ) ?? 0;
 
   // モックレコードの保存（オフライン時の蓄積シミュレーション）
-  const saveMockRecord = async () => {
-    await db.evidenceRecords.add({
-      id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
-      timestamp: Date.now(),
-      portNumber: 'MOCK-PORT-01',
-      imageBlob: new Blob(['mock image data'], { type: 'image/jpeg' }),
-      isMasked: enableMasking,
-      syncStatus: 'pending'
-    });
-  };
-
-  // バックグラウンド同期のシミュレーション
-  const syncRecords = async () => {
-    const pendingRecords = await db.evidenceRecords.where('syncStatus').equals('pending').toArray();
-    if (pendingRecords.length === 0) return;
-    
-    // ネットワーク遅延のシミュレート
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // 送信成功としてステータスを更新 (モック)
-    // 実際の運用ではここでGCPの署名付きURLを取得してPUTし、200 OKを受けてから更新する
-    await db.evidenceRecords.where('syncStatus').equals('pending').modify({ syncStatus: 'synced' });
-    console.log('[Sync-Aware UX] Sync Complete: ' + pendingRecords.length + ' records synced.');
+  const handleSaveMockRecord = async () => {
+    await saveMockRecord(enableMasking);
   };
 
   // オンライン復帰（オフラインモードOFF）を検知して同期を実行
@@ -84,59 +61,6 @@ function App() {
       startCamera();
     }
   };
-
-  // 外部からの依存変更やアンマウント時のクリーンアップのみを担当するuseEffect
-  // isScanningとisModelLoadedの変更を検知してループを自動的に起動・停止する（React Standard）
-  useEffect(() => {
-    let animationId: number;
-
-    const animate = async (timestamp: number) => {
-      const videoElement = document.querySelector('video') as HTMLVideoElement;
-      
-      // スタンダードな防御的実装: ビデオが本当に再生可能かチェックする
-      const isVideoReady = videoElement 
-        && videoElement.readyState >= 2 
-        && videoElement.videoWidth > 0 
-        && videoElement.videoHeight > 0;
-
-      if (isVideoReady) {
-        // 5fpsスロットリング
-        if (lastFrameTimeRef.current === null || timestamp - lastFrameTimeRef.current >= 200) {
-          lastFrameTimeRef.current = timestamp;
-          
-          try {
-            const results = await detect(videoElement);
-            
-            // isScanning自体はクロージャだが、このループは isScanning が変わるたびに
-            // useEffectによって破棄・再生成されるため、常に最新の true を見ている
-            setPredictions(results);
-            
-            // functional update を使うことでクロージャに依存せずカウントアップする
-            setDebugLoopCount(prev => prev + 1);
-            setDebugLastResultCount(results.length);
-          } catch (e) {
-             console.error("Detection error:", e);
-          }
-        }
-      }
-
-      // 次のフレームをスケジュール
-      animationId = requestAnimationFrame(animate);
-    };
-
-    if (isScanning && isModelLoaded) {
-      lastFrameTimeRef.current = null;
-      // ループ開始
-      animationId = requestAnimationFrame(animate);
-    }
-
-    // クリーンアップ関数（Strict Modeによる再マウント時やスキャン停止時に絶対に前のループを殺す）
-    return () => {
-      if (animationId !== undefined) {
-        cancelAnimationFrame(animationId);
-      }
-    };
-  }, [isScanning, isModelLoaded, detect]);
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -204,7 +128,7 @@ function App() {
           </button>
 
           <button 
-            onClick={saveMockRecord}
+            onClick={handleSaveMockRecord}
             style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#2196f3', color: 'white' }}
           >
             📸 Save Result (Mock)
