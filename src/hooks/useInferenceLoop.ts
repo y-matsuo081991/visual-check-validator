@@ -16,6 +16,16 @@ export const useInferenceLoop = (
     let animationId: number;
 
     const animate = async (timestamp: number) => {
+      // スロットリング制御: 100ms経過していない場合は推論をスキップするが、ループは維持する
+      // ADR-005 (Modified): PoCのExit Criteria（0.1秒推論によるUX担保）を満たすため、10fps (100ms) に設定
+      if (lastFrameTimeRef.current !== null && timestamp - lastFrameTimeRef.current < 100) {
+        if (isScanning && isModelLoaded) {
+          animationId = requestAnimationFrame(animate);
+        }
+        return;
+      }
+      lastFrameTimeRef.current = timestamp;
+
       const videoElement = document.querySelector('video') as HTMLVideoElement;
       
       const isVideoReady = videoElement 
@@ -24,18 +34,14 @@ export const useInferenceLoop = (
         && videoElement.videoHeight > 0;
 
       if (isVideoReady) {
-        if (lastFrameTimeRef.current === null || timestamp - lastFrameTimeRef.current >= 200) {
-          lastFrameTimeRef.current = timestamp;
+        try {
+          const results = await detect(videoElement);
           
-          try {
-            const results = await detect(videoElement);
-            
-            setPredictions(results);
-            setDebugLoopCount(prev => prev + 1);
-            setDebugLastResultCount(results.length);
-          } catch (e) {
-             console.error("Detection error:", e);
-          }
+          setPredictions(results);
+          setDebugLoopCount(prev => prev + 1);
+          setDebugLastResultCount(results.length);
+        } catch (e) {
+          console.error("Detection error:", e);
         }
       }
 

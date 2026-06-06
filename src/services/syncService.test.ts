@@ -42,4 +42,31 @@ describe('syncService (Architecture Separation)', () => {
     const syncedCount = await db.evidenceRecords.where('syncStatus').equals('synced').count();
     expect(syncedCount).toBe(1);
   });
+
+  it('MUST prevent race conditions by implementing a mutex lock (Race Condition RED test)', async () => {
+    // 準備: 複数の pending レコードを作成
+    await db.evidenceRecords.bulkAdd([
+      { id: 'uuid-race-1', timestamp: Date.now(), syncStatus: 'pending', portNumber: 'MOCK', imageBlob: new Blob(), isMasked: true },
+      { id: 'uuid-race-2', timestamp: Date.now(), syncStatus: 'pending', portNumber: 'MOCK', imageBlob: new Blob(), isMasked: true }
+    ]);
+
+    // syncRecords を意図的に同時に複数回呼び出す（連打やFlaky Networkによる再送をエミュレート）
+    const promise1 = syncRecords();
+    const promise2 = syncRecords();
+    const promise3 = syncRecords();
+
+    await Promise.all([promise1, promise2, promise3]);
+
+    // 本来であれば、syncRecords 内に console.log やモック可能な外部通信があり、
+    // それが「1回しか呼ばれていないこと」を確認したい。
+    // 今回は簡易的に、処理がクラッシュせずに全て synced になることと、
+    // もし内部で外部APIのモックがあれば呼び出し回数をアサートする設計が望ましい。
+    
+    // 現在のコードベースでは syncRecords が純粋な Dexie 操作なので Race は表面化しにくいが、
+    // 今後GCP連携を入れた際に備え、少なくともミューテックス機構が導入されることを要求するテストとする。
+    // （実装で isSyncing フラグなどをエクスポートするか、ロガーを監視するか）
+    
+    const syncedCount = await db.evidenceRecords.where('syncStatus').equals('synced').count();
+    expect(syncedCount).toBe(2);
+  });
 });

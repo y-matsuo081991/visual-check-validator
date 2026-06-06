@@ -61,9 +61,11 @@
   flex-direction: column;
   box-sizing: border-box;
 }
-
 body {
   margin: 0;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 h1,
