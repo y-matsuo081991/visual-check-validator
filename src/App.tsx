@@ -16,17 +16,11 @@ function App() {
   
   // Sync-Aware UX: オフラインモック用のステート
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false); // 同期的なロック用
 
   // 推論ループのロジックを分離したHookを利用
   const { predictions, setPredictions, debugLoopCount, debugLastResultCount } = useInferenceLoop(isScanning, isModelLoaded, detect);
-
-  const isMountedRef = useRef<boolean>(true);
-  
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
 
   // Sync-Aware UX: 未同期（pending）のレコード数をDexieからリアルタイム取得
   const pendingCount = useLiveQuery(
@@ -36,13 +30,33 @@ function App() {
 
   // モックレコードの保存（オフライン時の蓄積シミュレーション）
   const handleSaveMockRecord = async () => {
-    await saveMockRecord(enableMasking);
+    // ステート更新の遅延による連打バグを防ぐため、Refで同期的にロックする
+    if (isSavingRef.current) return;
+    
+    isSavingRef.current = true;
+    setIsSaving(true);
+    try {
+      await saveMockRecord(enableMasking);
+      // ADR-001 (Sync-Aware UX): 保存完了直後、もしオンラインであれば裏側で即座に同期を走らせる
+      if (!isOfflineMode) {
+        syncRecords().catch(err => {
+          console.error('[Sync Error] 即時同期に失敗しました:', err);
+        });
+      }
+    } finally {
+      // React 18 ベストプラクティス: isMountedRef ガードは不要
+      setIsSaving(false);
+      isSavingRef.current = false;
+    }
   };
 
   // オンライン復帰（オフラインモードOFF）を検知して同期を実行
   useEffect(() => {
     if (!isOfflineMode) {
-      syncRecords();
+      syncRecords().catch(err => {
+        // [must] 外部APIエラー時のサイレントバグ（Unhandled Promise Rejection）の防止
+        console.error('[Sync Error] バックグラウンド同期に失敗しました:', err);
+      });
     }
   }, [isOfflineMode]);
 
@@ -129,7 +143,8 @@ function App() {
 
           <button 
             onClick={handleSaveMockRecord}
-            style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#2196f3', color: 'white' }}
+            disabled={isSaving}
+            style={{ padding: '10px 20px', fontSize: '16px', cursor: isSaving ? 'not-allowed' : 'pointer', backgroundColor: isSaving ? '#ccc' : '#2196f3', color: 'white' }}
           >
             📸 Save Result (Mock)
           </button>
