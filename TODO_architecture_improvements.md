@@ -14,11 +14,19 @@
 ## 2. Performance & Memory Management (パフォーマンスとメモリ管理)
 - [x] **TF.js のメモリリーク解消 (ADR-004):**
   `useObjectDetection.ts` における推論ループ内で生成されるテンソルが解放されていない問題を解決するため、`tf.tidy()` または `tensor.dispose()` を導入し、モバイル端末でのOOM（Out Of Memory）クラッシュを防止する。
-- [x] **推論ループのスロットリング:**
-  `requestAnimationFrame` を用いた無制限の推論（約60fps）は、モバイル端末の熱暴走とバッテリー枯渇を招く。フレームレートを制限（例: 5fps）するスロットル制御を導入する。
+- [x] **【DRIFT解消: 実装済】推論ループのスロットリング (ADR-005):**
+  `requestAnimationFrame` を用いた無制限の推論（約60fps）は、モバイル端末の熱暴走とバッテリー枯渇を招く。`hooks/useInferenceLoop.ts` の `animate` 関数内にフレームレートを制限（例: 5fps, 200ms間隔）するスロットル制御を実装する。
 
 ## 3. Security & Fallback (セキュリティとフォールバック)
 - [x] **Defensive Masking の実装 (ADR-002):**
   現在 `CameraScanner.tsx` はBounding Boxの描画のみを行っているが、AIが検知した対象物「以外」の背景をCanvas上で黒塗り（マスキング）する処理を追加実装し、機密情報の流出を物理的に遮断する。
 - [x] **WASMバックエンドのフォールバック (ADR-004):**
   iOS環境等で WebGL の16-bit浮動小数点制限に起因する推論精度の低下が確認された場合に備え、`@tensorflow/tfjs-backend-wasm` を導入し、動的にバックエンドを切り替えられるフォールバック処理を実装する。
+
+## 4. Reliability & MLOps (信頼性とAI監視) ※新規追加
+- [x] **【DRIFT解消: 実装済】AI品質の継続的監視 / MLOpsサンプリング (ADR-003):**
+  Edge AIの判定確信度（Confidence Score）が低い「スレスレの画像（全体の数%）」のみをサンプリングし、マスキングせずに生データとして保持するロジックを `CameraScanner.tsx` に追加する（現状は一律マスキングされている）。
+- [x] **UI連打対策と冪等性の担保 (ADR-005):**
+  `App.tsx` の保存ボタンに対して、処理実行中（`isSaving`）はボタンを非活性化する排他制御を導入し、IndexedDBへの重複レコード保存を防止する。
+- [x] **バックグラウンド同期のレースコンディション防止 (ADR-005):**
+  `syncService.ts` にて、同期プロセスが実行中（`isSyncing`）であることを示すミューテックスを設け、連打や通信遅延によって発生するGCPへの二重送信（競合）を安全に防ぐロック機構を実装する。

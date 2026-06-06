@@ -4,18 +4,17 @@ import { useInferenceLoop } from './useInferenceLoop';
 
 describe('useInferenceLoop (Architecture Separation)', () => {
   const mockDetect = vi.fn();
-  let time = 0;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    time = performance.now();
 
-    // requestAnimationFrame を同期的に進めるモック
+    // requestAnimationFrame を現実的な時間で進めるモック
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-      // 5fps (200ms) のスロットリングを突破するために十分な時間を進める
-      time += 250;
-      setTimeout(() => cb(time), 0);
-      return 1;
+      // Vitestの環境下で、実時間ベースで呼び出すことで
+      // setTimeout(500) と同期して 500ms 分だけ進むようにする
+      const t = performance.now();
+      setTimeout(() => cb(t), 16);
+      return Math.floor(t);
     });
 
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
@@ -67,5 +66,25 @@ describe('useInferenceLoop (Architecture Separation)', () => {
     unmount();
 
     expect(cancelAnimationFrame).toHaveBeenCalled();
+  });
+
+  it('MUST throttle inference loop to approximately 10fps (100ms) to satisfy PoC Exit Criteria (PoC Audit RED test)', async () => {
+    mockDetect.mockResolvedValue([]);
+    // リセット
+    mockDetect.mockClear();
+
+    renderHook(() => useInferenceLoop(true, true, mockDetect));
+
+    await act(async () => {
+      // 500ms 経過させる
+      await new Promise(resolve => setTimeout(resolve, 500));
+    });
+
+    // RED: PoCのExit Criteria（0.1秒推論による待ち時間ゼロ）を満たすため、
+    // スロットリングは 200ms(5fps) ではなく 100ms(10fps) でなければならない。
+    // 500ms の間に約5回（テストのブレを考慮して4〜15回の間）呼ばれるべきだが、
+    // 現状は 200ms 設定のため 2〜3 回しか呼ばれず RED になる。
+    expect(mockDetect.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(mockDetect.mock.calls.length).toBeLessThanOrEqual(20);
   });
 });

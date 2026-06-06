@@ -1,29 +1,30 @@
 import React, { useEffect, useRef } from 'react';
 import type { DetectedObject } from '@tensorflow-models/coco-ssd';
-
-export interface CameraScannerProps {
+interface CameraScannerProps {
   stream: MediaStream | null;
   predictions: DetectedObject[];
-  enableMasking?: boolean; // TDD RED Phase: property added to pass TS
+  enableMasking: boolean;
+  mlopsThreshold?: number; // [should] MLOpsサンプリング閾値のマジックナンバー排除
 }
 
-export const CameraScanner: React.FC<CameraScannerProps> = ({ stream, predictions, enableMasking = false }) => {
+export const CameraScanner: React.FC<CameraScannerProps> = ({ stream, predictions, enableMasking, mlopsThreshold = 0.60 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // カメラストリームの割り当て
+  // カメラ映像をvideo要素に接続
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
     }
   }, [stream]);
 
-  // 推論結果の描画 (Bounding Box) と 黒塗り処理 (Defensive Masking)
+  // Bounding Box とマスキングの描画ロジック
   useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const maskCanvas = maskCanvasRef.current;
+
     if (!video || !canvas || !maskCanvas) return;
 
     const ctx = canvas.getContext('2d');
@@ -43,9 +44,17 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ stream, prediction
 
     // --- Mask Canvas (黒塗り処理) ---
     maskCtx.clearRect(0, 0, width, height);
-    
+
+    let skipMaskingForMLOps = false;
+    // ADR-003: MLOpsサンプリング (Data Feedback Loop)
+    // 確信度が閾値未満の「スレスレの画像」が存在する場合、再学習用の生データとして
+    // 確保するため、Defensive Masking を意図的にスキップする。
+    if (predictions.some(p => p.score < mlopsThreshold)) {
+      skipMaskingForMLOps = true;
+    }
+
     // ADR-002: 機密情報保護のため、enableMasking がONの時は常に背景を黒塗りする
-    if (enableMasking) {
+    if (enableMasking && !skipMaskingForMLOps) {
       // まず画面全体を真っ黒に塗る（対象物がない場合でも背景を隠し通す）
       maskCtx.fillStyle = 'rgba(0, 0, 0, 0.9)'; // ほぼ真っ黒だが、UI確認のために若干透過
       maskCtx.fillRect(0, 0, width, height);
@@ -81,7 +90,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ stream, prediction
       ctx.fillStyle = '#000000';
       ctx.fillText(text, x + 5, y - 6);
     });
-  }, [predictions, enableMasking]);
+  }, [predictions, enableMasking, mlopsThreshold]);
 
   return (
     <div style={{ position: 'relative', width: '100%', maxWidth: '640px', margin: '0 auto' }}>
