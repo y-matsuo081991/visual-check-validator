@@ -32,6 +32,22 @@ export const syncRecords = async (): Promise<void> => {
     const pendingRecords = await db.evidenceRecords.where('syncStatus').equals('pending').toArray();
     if (pendingRecords.length === 0) return;
 
+    // アクティブヘルスチェックによるLie-Fi対策 (Active Ping)
+    // ネットワーク接続（navigator.onLine）がtrueであっても、パケットが通過するかを実検証する
+    if (!(import.meta.env && import.meta.env.DEV && !import.meta.env.TEST)) {
+      console.log('[Sync-Aware UX] Performing active health-check ping to detect Lie-Fi...');
+      try {
+        const pingResponse = await fetch('/api/health-check', { method: 'GET' });
+        if (!pingResponse.ok) {
+          throw new Error(`Active health-check failed with status: ${pingResponse.status}`);
+        }
+        console.log('[Sync-Aware UX] Active health-check passed. Network is reliable.');
+      } catch (error) {
+        console.error('[Sync-Aware UX] Active health-check failed. Preventing sync.', error);
+        throw error;
+      }
+    }
+
     const pendingIds = pendingRecords.map(r => r.id);
     const maxRetries = 3;
     let attempt = 0;

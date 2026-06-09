@@ -28,9 +28,8 @@ describe('syncService (Architecture Separation)', () => {
 
   it('MUST sync pending records and update their status to "synced"', async () => {
     // fetch が 200 OK を返すようにモック
-    const mockFn = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
+    const mockFn = vi.fn().mockImplementation(async () => {
+      return { ok: true, status: 200 };
     });
     vi.stubGlobal('fetch', mockFn);
 
@@ -51,12 +50,17 @@ describe('syncService (Architecture Separation)', () => {
     const syncedCount = await db.evidenceRecords.where('syncStatus').equals('synced').count();
     expect(syncedCount).toBe(1);
 
-    expect(mockFn).toHaveBeenCalledTimes(1);
+    expect(mockFn).toHaveBeenCalledTimes(2);
+    expect(mockFn.mock.calls[0][0]).toContain('/api/health-check');
+    expect(mockFn.mock.calls[1][0]).toContain('/api/sync-evidence');
   });
 
   it('MUST prevent race conditions by implementing a mutex lock', async () => {
     // 成功モックだが少し遅延させてロック期間を作る
-    const mockFn = vi.fn().mockImplementation(async () => {
+    const mockFn = vi.fn().mockImplementation(async (url) => {
+      if (url.includes('/api/health-check')) {
+        return { ok: true, status: 200 };
+      }
       await new Promise(r => setTimeout(r, 100));
       return { ok: true, status: 200 };
     });
@@ -74,14 +78,18 @@ describe('syncService (Architecture Separation)', () => {
 
     const syncedCount = await db.evidenceRecords.where('syncStatus').equals('synced').count();
     expect(syncedCount).toBe(1);
-    // Mutexが効いていれば fetch は1回しか呼ばれない
-    expect(mockFn).toHaveBeenCalledTimes(1);
+    // Mutexが効いていれば、ヘルスチェックと同期アップロードがそれぞれ1回ずつしか呼ばれない（計2回）
+    expect(mockFn).toHaveBeenCalledTimes(2);
   });
 
   it('MUST retry with Exponential Backoff when network fails (Reliability RED test)', async () => {
     // 1回目、2回目は 500 エラー、3回目に 200 OK となるように fetch をモック
+    // ヘルスチェックは無条件で 200 OK
     let attemptCount = 0;
-    const mockFn = vi.fn().mockImplementation(async () => {
+    const mockFn = vi.fn().mockImplementation(async (url) => {
+      if (url.includes('/api/health-check')) {
+        return { ok: true, status: 200 };
+      }
       attemptCount++;
       if (attemptCount <= 2) {
         return { ok: false, status: 500 };
@@ -103,7 +111,8 @@ describe('syncService (Architecture Separation)', () => {
     
     expect(syncedCount).toBe(1);
     expect(pendingCount).toBe(0);
-    expect(mockFn).toHaveBeenCalledTimes(3);
+    // ヘルスチェック(1回) + 同期送信(リトライ2回 + 成功1回 = 3回) = 計4回
+    expect(mockFn).toHaveBeenCalledTimes(4);
   });
 
   it('MUST queue and execute subsequent sync requests to prevent silent data loss (Queueing RED test)', async () => {
@@ -112,7 +121,10 @@ describe('syncService (Architecture Separation)', () => {
     const sentBodies: any[] = [];
     
     // ネットワーク遅延をシミュレート（1回目の同期処理が 300ms かかるようにする）
-    const mockFn = vi.fn().mockImplementation(async (_url, options) => {
+    const mockFn = vi.fn().mockImplementation(async (url, options) => {
+      if (url.includes('/api/health-check')) {
+        return { ok: true, status: 200 };
+      }
       sentBodies.push(JSON.parse(options.body));
       await new Promise(r => setTimeout(r, 300));
       return { ok: true, status: 200 };
@@ -166,5 +178,38 @@ describe('syncService (Architecture Separation)', () => {
     // 現在のバグでは、'queue-test-2' は送信されていないため FAIL する
     expect(sentIds).toContain('queue-test-1');
     expect(sentIds).toContain('queue-test-2');
+  });
+
+  it('MUST perform an active health-check ping and halt sync if ping fails (Lie-Fi prevention RED test)', async () => {
+    // URLに応じて異なる応答を返すモックを設定
+    const mockFn = vi.fn().mockImplementation(async (url) => {
+      if (url.includes('/api/health-check')) {
+        // Ping疎通確認が失敗（Lie-Fi状態：インターネット繋がらず）
+        return { ok: false, status: 500 };
+      }
+      if (url.includes('/api/sync-evidence')) {
+        return { ok: true, status: 200 };
+      }
+      return { ok: false, status: 404 };
+    });
+    vi.stubGlobal('fetch', mockFn);
+
+    await db.evidenceRecords.add({
+      id: 'liefi-test-1', timestamp: Date.now(), syncStatus: 'pending',
+      portNumber: 'MOCK', imageBlob: new Blob(), isMasked: true
+    });
+
+    // 実行。Ping失敗時に同期処理が中断され、エラーが投げられることを期待
+    await expect(syncRecords()).rejects.toThrow();
+
+    // 1. 同期処理が中断されているため、ステータスは pending のままであること
+    const pendingCount = await db.evidenceRecords.where('syncStatus').equals('pending').count();
+    expect(pendingCount).toBe(1);
+
+    // 2. /api/health-check への Ping は実行されたが、/api/sync-evidence へのアップロードは一切呼び出されていないこと
+    expect(mockFn).toHaveBeenCalled();
+    const calledUrls = mockFn.mock.calls.map(args => args[0]);
+    expect(calledUrls).toContain('/api/health-check');
+    expect(calledUrls).not.toContain('/api/sync-evidence');
   });
 });
