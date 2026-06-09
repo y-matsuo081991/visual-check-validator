@@ -60,6 +60,33 @@ function App() {
     }
   }, [isOfflineMode]);
 
+  // ADR-008: visibilitychange と beforeunload による離脱防止とデータロスト防護
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (pendingCount > 0) {
+        e.preventDefault();
+        e.returnValue = '未同期のデータがあります。本当にページを離れますか？'; // Chrome等で警告ダイアログを出すための標準仕様
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && pendingCount > 0) {
+        console.log('[Sync-Aware UX] ページがバックグラウンドに移行しました。同期を試みます。');
+        syncRecords().catch(err => {
+          console.error('[Sync Error] visibilitychange時の同期に失敗:', err);
+        });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [pendingCount]);
+
   // 状態とRefを同期して更新するヘルパー
   const toggleScanning = (scanning: boolean) => {
     setIsScanning(scanning);

@@ -444,4 +444,43 @@ describe('App Component (Sync-Aware UX)', () => {
 
     unmount();
   });
+
+  it('MUST show warning on beforeunload and trigger sync on visibilitychange when there are pending records (ADR-008 Decision 2 RED test)', async () => {
+    // 1. オフラインモードにしてpendingレコードを作成
+    const user = userEvent.setup();
+    const { getByText, unmount } = render(<App />);
+
+    const offlineToggle = await waitFor(() => getByText(/Simulate Offline Mode: OFF/));
+    const saveMockButton = getByText(/Save Result \(Mock\)/) as HTMLButtonElement;
+
+    // オフラインにして保存
+    await user.click(offlineToggle);
+    await user.click(saveMockButton);
+
+    // 未同期が1件になるのを待つ
+    await waitFor(() => {
+      expect(screen.getByText(/☁️ 未同期: 1件/)).toBeInTheDocument();
+    });
+
+    // --- beforeunload の検証 ---
+    const beforeUnloadEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(beforeUnloadEvent);
+    
+    // RED: pendingがある場合は preventDefault され、離脱警告が行われるべき
+    // JSDOMのEventではpreventDefaultが呼ばれたかは defaultPrevented で判定できる
+    expect(beforeUnloadEvent.defaultPrevented).toBe(true);
+
+    // --- visibilitychange の検証 ---
+    const syncSpy = vi.spyOn(syncService, 'syncRecords');
+    
+    // JSDOMで visibilityState を 'hidden' に変更してイベント発火
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    // RED: バックグラウンドに回った瞬間（hidden）に強制同期が走るべき
+    expect(syncSpy).toHaveBeenCalled();
+
+    syncSpy.mockRestore();
+    unmount();
+  });
 });
